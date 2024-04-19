@@ -13,14 +13,16 @@ Ndt_slam::Ndt_slam(const rclcpp::NodeOptions &options)
       base_frame_("base_link"),
       odom_frame_("odom"),
       ndt_resolution_(1.0),
-      ndt_num_threads_(2),
-      dist_threshold_update_(0.1),
+      ndt_num_threads_(4),
+      dist_threshold_update_(1),
       reading_voxel_grid_size_(0.2),
       map_voxel_grid_size_(0.1),
-      scan_min_range_(0.1),
+      scan_min_range_(1.0),
       scan_max_range_(20.0),
-      map_publish_period_(0.1),
-      num_targeted_cloud_(250),
+
+      map_publish_period_(10),
+      num_targeted_cloud_(20),
+      
       initial_pose_x_(0.0),
       initial_pose_y_(0.0),
       initial_pose_z_(0.0),
@@ -97,6 +99,7 @@ void Ndt_slam::cloud_callback(const typename sensor_msgs::msg::PointCloud2::Shar
     RCLCPP_WARN(get_logger(), "initial_pose is not received");
     return;
   }
+  RCLCPP_INFO(get_logger(), "Received point cloud with %d points.", msg->width * msg->height);
 
   sensor_msgs::msg::PointCloud2 transformed_msg;
   try
@@ -161,13 +164,17 @@ void Ndt_slam::initial_pose_callback(const typename geometry_msgs::msg::PoseStam
  **/
 void Ndt_slam::initializePubSub()
 {
+  rclcpp::QoS custom_qos(500); 
+  custom_qos.keep_all();        
+  custom_qos.reliable();       
+  
   pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("current_pose", 10);
   map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("map", 10);
   map_array_pub_ = this->create_publisher<slam_msgs::msg::MapArray>("map_array", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
   path_pub_ = this->create_publisher<nav_msgs::msg::Path>("path", 10);
 
   initial_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>("initial_pose", 10, std::bind(&Ndt_slam::initial_pose_callback, this, std::placeholders::_1));
-  input_cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>("input_cloud", rclcpp::SensorDataQoS(), std::bind(&Ndt_slam::cloud_callback, this, std::placeholders::_1));
+  input_cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>("input_cloud", custom_qos , std::bind(&Ndt_slam::cloud_callback, this, std::placeholders::_1));
 }
 
 /**
