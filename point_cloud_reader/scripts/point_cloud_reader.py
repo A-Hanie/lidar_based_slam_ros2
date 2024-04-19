@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import os
 import struct
 import numpy as np
@@ -7,24 +6,33 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, HistoryPolicy, ReliabilityPolicy
+
 
 class pointcloud_Pub_Node(Node):
     def __init__(self):
         super().__init__('pointCloud_publisher')
         self.file_index = 0
         self.time = 0.5 # sec
-        self.publisher_point_cloud = self.create_publisher(PointCloud2, '/point_cloud', qos_profile_sensor_data)
+
+        custom_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_ALL,
+            reliability=ReliabilityPolicy.RELIABLE,
+            depth=500 
+        )
+
+        self.publisher_point_cloud = self.create_publisher(PointCloud2, '/point_cloud', custom_qos)
         self.path_point_cloud = 'data/data/'
         self.file_names_point_cloud = []
         self.create_publishers_data_file_names()
         self.timer = self.create_timer(self.time, self.on_timer_callback)
-
+        
     def on_timer_callback(self):
         if self.file_index < len(self.file_names_point_cloud):
             self.get_logger().info(f'Reading file at index: {self.file_index}')
             point_cloud_msg = self.read_point_cloud_from_file()
             self.publisher_point_cloud.publish(point_cloud_msg)
+            self.get_logger().info(f'Published point cloud with {len(point_cloud_msg.data) // point_cloud_msg.point_step} points.')
             self.file_index += 1
         else:
             self.get_logger().info('Finished processing all point cloud files.')
@@ -85,3 +93,4 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+    
