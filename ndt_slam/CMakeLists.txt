@@ -109,10 +109,6 @@ install(TARGETS
 )
 
 
-install(
-  DIRECTORY scripts
-  DESTINATION share/ndt_slam
-)
 
 
 ament_export_include_directories(include)
