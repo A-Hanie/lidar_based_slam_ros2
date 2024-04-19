@@ -25,7 +25,7 @@ flowchart LR
 ```
 ##  Installation
 
-#### 1. Clone the repo inside src in your workspace then build with
+#### 1. Clone the repo and build with
 
 ```bash
 cd ~/ros2_ws/src
