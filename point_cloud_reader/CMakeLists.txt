@@ -21,7 +21,7 @@ endif()
 
 
 install(
-  DIRECTORY launch bags scripts
+  DIRECTORY launch scripts
   DESTINATION share/point_cloud_reader
 )
 
