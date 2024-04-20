@@ -61,7 +61,15 @@ ros2 launch ndt_slam ndt_slam.launch.py
 #### Save the Map:
 
 Save the map by using the following ROS2 service call:
+
 ```bash
 ros2 service call /save_map std_srvs/srv/Trigger "{}"
+```
+
+## Localization
+
+Place the saved map inside `/maps` in localization_pkg package  directory and run the following:
+```bash
+ros2 launch localization_pkg localization.launch.py
 ```
 
