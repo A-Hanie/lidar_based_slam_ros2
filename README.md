@@ -1,7 +1,5 @@
 # lidar_based_slam_ros2
 
-## For faster response, text me: WhatsApp number: `+201154179988`
-
 ```mermaid
 flowchart LR
     A[Start Ndt_slam Node] --> B[Set Initial Pose]
@@ -76,3 +74,4 @@ ros2 launch localization_pkg localization.launch.py
 ```
 ---
 
+## For faster response, text me: WhatsApp number: `+201154179988`
