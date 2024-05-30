@@ -1,5 +1,7 @@
 # lidar_based_slam_ros2
 
+## For faster response, text me: WhatsApp number: `+201154179988`
+
 ```mermaid
 flowchart LR
     A[Start Ndt_slam Node] --> B[Set Initial Pose]
@@ -41,12 +43,12 @@ colcon build --symlink-install
 
 #### 1. Prepare Lidar Data:
 
-Place your Lidar data inside the `~/data/data` directory to ensure it can be accessed by point_cloud_reader node.
+Place your Lidar data inside the `~/ros2_ws/point_cloud_reader/data` directory.
 
 #### 2. Launch the Point Cloud Reader:
 
 ```bash
-ros2 run point_cloud_reader point_cloud_reader.py
+ros2 run point_cloud_reader pointcloud_node.py
 ```
 
 #### 3. Run SLAM:
@@ -54,7 +56,6 @@ ros2 run point_cloud_reader point_cloud_reader.py
 ```bash
 ros2 launch ndt_slam ndt_slam.launch.py
 ```
-
 
 ## Map saving
 
@@ -68,8 +69,10 @@ ros2 service call /save_map std_srvs/srv/Trigger "{}"
 
 ## Localization
 
-Place the saved map inside `/maps` in localization_pkg package  directory and run the following:
+Place the saved map and path inside the /maps directory in the localization_pkg package, and then run the following:
+
 ```bash
 ros2 launch localization_pkg localization.launch.py
 ```
+---
 
