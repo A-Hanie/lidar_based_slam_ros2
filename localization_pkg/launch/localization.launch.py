@@ -8,27 +8,20 @@ def generate_launch_description():
     rviz_config_path = launch.substitutions.LaunchConfiguration(
         'rviz_config_path',
         default=os.path.join(
-            get_package_share_directory('ndt_slam'),
+            get_package_share_directory('localization_pkg'),
             'rviz',
-            'mapping.rviz'))
+            'localization.rviz'))
 
-    # NDT SLAM 
-    mapping_node = launch_ros.actions.Node(
-        package='ndt_slam',
-        executable='ndt_slam_node',
-        name='ndt_slam_node',
+    # localization 
+    localization_node = launch_ros.actions.Node(
+        package='localization_pkg',
+        executable='localization_node',
+        name='localization_node',
         remappings=[('/input_cloud', '/point_cloud')],
         output='screen'
     )
-
-    #  RViz 
-    rviz_node = launch_ros.actions.Node(
-        package='rviz2',
-        executable='rviz2',
-        arguments=['-d', rviz_config_path],
-        name='rviz2'
-    )
     
+
     rviz_text = launch_ros.actions.Node(
         package='rviz_2d_overlay_plugins',
         executable='string_to_overlay_text',
@@ -39,14 +32,23 @@ def generate_launch_description():
             {"fg_color": "g"},
         ]
     )
+        
 
+    #  RViz 
+    rviz_node = launch_ros.actions.Node(
+        package='rviz2',
+        executable='rviz2',
+        arguments=['-d', rviz_config_path],
+        name='rviz2'
+    )
+    
     # Statistics
     Statistics_node = launch_ros.actions.Node(
         package='ndt_slam',
         executable='Statistics.py',
         arguments=['-d', rviz_config_path],
         name='Statistics_node'
-    )  
+    )   
     
     # PC
     pointcloud_reader_node = launch_ros.actions.Node(
@@ -56,15 +58,16 @@ def generate_launch_description():
     )  
     
     
+
     try:
         return launch.LaunchDescription([
             launch.actions.DeclareLaunchArgument(
                 'rviz_config_path',
                 default_value=rviz_config_path,
                 description='Path to RViz configuration file for visualization'),
-            mapping_node,
             rviz_node,
-            # Statistics_node,
+            localization_node,
+            Statistics_node,
             # pointcloud_reader_node,
             rviz_text
         ])

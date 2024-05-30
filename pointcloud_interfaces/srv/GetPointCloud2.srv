@@ -1,0 +1,3 @@
+int64 index
+---
+sensor_msgs/PointCloud2 point_cloud

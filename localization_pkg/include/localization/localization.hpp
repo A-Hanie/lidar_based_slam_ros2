@@ -1,12 +1,15 @@
-#ifndef NDT_SLAM_H_
-#define NDT_SLAM_H_
+#ifndef localization_H_
+#define localization_H_
 
 // Standard libraries
 #include <memory>
 #include <thread>
 #include <future>
+
 #include <fstream>
-#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
 
 // ROS libraries
 #include <rclcpp/rclcpp.hpp>
@@ -18,10 +21,11 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <slam_msgs/msg/map_array.hpp>
-#include "std_srvs/srv/trigger.hpp"
 
 #include "slam_msgs/msg/point_cloud_index.hpp"
 
+#include "std_srvs/srv/trigger.hpp"
+#include <ament_index_cpp/get_package_share_directory.hpp>
 
 // TF2 libraries for transformations
 #include <tf2_ros/buffer.h>
@@ -40,13 +44,13 @@
 #include <pclomp/gicp_omp_impl.hpp>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/io/pcd_io.h>
-#include <pointcloud_interfaces/srv/get_point_cloud2.hpp> // include the service definition
 
 
-class Ndt_slam : public rclcpp::Node
+
+class localization : public rclcpp::Node
 {
 public:
-  explicit Ndt_slam(const rclcpp::NodeOptions &options);
+  explicit localization(const rclcpp::NodeOptions &options);
 
 private:
   // ROS Types
@@ -59,11 +63,12 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
   rclcpp::Publisher<slam_msgs::msg::MapArray>::SharedPtr map_array_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
-  
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr initial_pose_sub_;
   rclcpp::Subscription<slam_msgs::msg::PointCloudIndex>::SharedPtr input_cloud_sub_;
+
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr save_service_;
-  // rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr point_cloud_client_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr restart_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr relocalize_service_;
 
 
   // msgs 
@@ -98,7 +103,6 @@ private:
   double scan_min_range_{0.1};
   double scan_max_range_{100.0};
   double map_publish_period_;
-  
   int num_targeted_cloud_;
 
   // Flags
@@ -114,6 +118,8 @@ private:
   double initial_pose_qy_;
   double initial_pose_qz_;
   double initial_pose_qw_;
+
+  unsigned int cloud_index_{0};
 
   // odom
   double latest_distance_{0};
@@ -131,32 +137,22 @@ private:
   void publishTransformedPose(const pcl::PointCloud<pcl::PointXYZI>::ConstPtr &cloud_ptr, const Eigen::Matrix4f &final_transformation, const rclcpp::Time &stamp);
   Eigen::Matrix4f poseToEigenMatrix(const geometry_msgs::msg::Pose pose);
   void map_pub(const slam_msgs::msg::MapArray &map_array_msg, const std::string &map_frame_id);
-  void updateMap(const pcl::PointCloud<pcl::PointXYZI>::ConstPtr cloud_ptr, const Eigen::Matrix4f final_transformation, const geometry_msgs::msg::PoseStamped current_pose_stamped);
+  void updateLocation(const pcl::PointCloud<pcl::PointXYZI>::ConstPtr cloud_ptr, const Eigen::Matrix4f final_transformation, const geometry_msgs::msg::PoseStamped current_pose_stamped);
   void prepareMapUpdateTask(const pcl::PointCloud<pcl::PointXYZI>::ConstPtr &cloud_ptr, const Eigen::Matrix4f &final_transformation);
   void initial_pose_callback(const typename geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void cloud_callback(const slam_msgs::msg::PointCloudIndex::SharedPtr msg);
   void setInitialPose();
   void savePointCloud(const std::string& filename);
 
-  // ROS Services
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr pause_service_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr resume_service_;
-
-  int current_cloud_index_;                                                                  // Index to keep track of requested point clouds
-  std::chrono::milliseconds cloud_request_interval_;                                         // Interval to request new point clouds
-  rclcpp::Client<pointcloud_interfaces::srv::GetPointCloud2>::SharedPtr point_cloud_client_; // Service client
-  rclcpp::TimerBase::SharedPtr timer_;                                                       // Timer to handle periodic service requests
-
-  // Service handlers
-  void pauseSLAM(const std::shared_ptr<std_srvs::srv::Trigger::Request>,
-                 std::shared_ptr<std_srvs::srv::Trigger::Response> response);
-  void resumeSLAM(const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+  void restartSLAM(const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                   std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+                  
+  void loadGroundTruthPoses();
+  void publishNextGroundTruthPose();
 
-  void initializeServices();
-  void initializeTimer();
-  void requestPointCloud();
-  void handlePointCloudResponse(const sensor_msgs::msg::PointCloud2 &cloud_msg);
+  void handleRelocalization(const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                                        std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+
 };
 
-#endif // NDT_SLAM_H_
+#endif // localization_H_

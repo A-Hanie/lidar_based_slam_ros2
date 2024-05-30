@@ -1,0 +1,9 @@
+<library path="pointcloud_control_panel">
+    <class name="pointcloud_control_panel/PointCloudControlPanel"
+            type="pointcloud_control_panel::PointCloudControlPanel"
+            base_class_type="rviz_common::Panel">
+        <description>
+        Adds a control panel for Turtlebot3.
+        </description>
+    </class>
+</library>

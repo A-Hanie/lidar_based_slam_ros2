@@ -1,0 +1,7 @@
+<library path="lib/libslam_msgs_plugin">
+  <class name="slam_msgs/CustomPointCloudDisplay" type="CustomPointCloudDisplay" base_class_type="rviz_common::Display">
+    <description>
+      This is a custom display for visualizing PointCloudIndex messages including both the point cloud and index.
+    </description>
+  </class>
+</library>

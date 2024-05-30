@@ -13,7 +13,7 @@ class pointcloud_Pub_Node(Node):
     def __init__(self):
         super().__init__('pointCloud_publisher')
         self.file_index = 0
-        self.time = 0.5 # sec
+        self.time = 0.1 # sec
 
         custom_qos = QoSProfile(
             history=HistoryPolicy.KEEP_ALL,
@@ -21,7 +21,7 @@ class pointcloud_Pub_Node(Node):
             depth=500 
         )
 
-        self.publisher_point_cloud = self.create_publisher(PointCloud2, '/point_cloud', custom_qos)
+        self.publisher_point_cloud = self.create_publisher(PointCloud2, '/pointcloud_indexed', custom_qos)
         self.path_point_cloud = 'data/data/'
         self.file_names_point_cloud = []
         self.create_publishers_data_file_names()

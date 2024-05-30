@@ -1,9 +1,9 @@
-#include "ndt_slam/ndt_slam.hpp"
+#include "localization/localization.hpp"
 #include <chrono>
 
 using namespace std::chrono_literals;
 
-Ndt_slam::Ndt_slam(const rclcpp::NodeOptions &options)
+localization::localization(const rclcpp::NodeOptions &options)
     : Node("scan_matcher"),
       clock_(RCL_ROS_TIME),
       tfbuffer_(std::make_shared<rclcpp::Clock>(clock_)),
@@ -20,7 +20,7 @@ Ndt_slam::Ndt_slam(const rclcpp::NodeOptions &options)
       scan_min_range_(1.0),
       scan_max_range_(20.0),
 
-      map_publish_period_(10),
+      map_publish_period_(5),
       num_targeted_cloud_(20),
       
       initial_pose_x_(0.0),
@@ -30,7 +30,8 @@ Ndt_slam::Ndt_slam(const rclcpp::NodeOptions &options)
       initial_pose_qy_(0.0),
       initial_pose_qz_(0.0),
       initial_pose_qw_(0.0),
-      is_intial_pose_set(false)
+      cloud_index_(0),
+      is_intial_pose_set(true)
 {
 
   auto ndt = std::make_shared<pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>>();
@@ -62,17 +63,33 @@ Ndt_slam::Ndt_slam(const rclcpp::NodeOptions &options)
         response->message = "Map saved successfully.";
       });
 
-  if (!is_intial_pose_set)
+  if (is_intial_pose_set)
   {
-    setInitialPose();
+      setInitialPose();
   }
 
-  RCLCPP_INFO(get_logger(), "initialization end");
+  restart_service_ = this->create_service<std_srvs::srv::Trigger>(
+      "restart_localization",
+      [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+             std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+      {
+          this->restartSLAM(request, response);
+          response->success = true;
+          response->message = "localization restarted successfully.";
+      });
 
-  
+  relocalize_service_ = this->create_service<std_srvs::srv::Trigger>(
+      "relocalize",
+      [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+             std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+      {
+          this->handleRelocalization(request, response);
+      });
+
+  RCLCPP_INFO(get_logger(), "initialization end");
 }
 
-void Ndt_slam::setInitialPose()
+void localization::setInitialPose()
 {
   RCLCPP_INFO(get_logger(), "Setting initial pose");
   auto pose_msg = std::make_shared<geometry_msgs::msg::PoseStamped>();
@@ -89,62 +106,60 @@ void Ndt_slam::setInitialPose()
   pose_pub_->publish(current_pose_stamped_);
   initial_pose_received_ = true;
   path_.poses.push_back(*pose_msg);
-  is_intial_pose_set =true;
 }
 
 // callback functions
-void Ndt_slam::cloud_callback(const slam_msgs::msg::PointCloudIndex::SharedPtr msg)
+void localization::cloud_callback(const slam_msgs::msg::PointCloudIndex::SharedPtr msg)
 {
-  auto& cloud = msg->point_cloud; 
+    cloud_index_ = msg->index.data;
+    auto& cloud = msg->point_cloud;  
 
-  if (!initial_pose_received_)
-  {
-    RCLCPP_WARN(get_logger(), "initial_pose is not received");
-    return;
-  }
-  RCLCPP_INFO(get_logger(), "Received point cloud with %d points.", cloud.width * cloud.height);
-
-  sensor_msgs::msg::PointCloud2 transformed_msg;
-  try
-  {
-    tf2::TimePoint time_point = tf2::TimePoint(
-        std::chrono::seconds(cloud.header.stamp.sec) +
-        std::chrono::nanoseconds(cloud.header.stamp.nanosec));
-    const geometry_msgs::msg::TransformStamped transform = tfbuffer_.lookupTransform(
-        base_frame_, cloud.header.frame_id, time_point);
-    tf2::doTransform(cloud, transformed_msg, transform);
-  }
-  catch (tf2::TransformException &e)
-  {
-    RCLCPP_ERROR(this->get_logger(), "%s", e.what());
-    return;
-  }
-
-  pcl::PointCloud<pcl::PointXYZI>::Ptr pc_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-  pcl::fromROSMsg(transformed_msg, *pc_ptr);
-
-  pcl::PointCloud<pcl::PointXYZI>::Ptr tmp_ptr2(new pcl::PointCloud<pcl::PointXYZI>());
-  tmp_ptr2->points.reserve(pc_ptr->points.size()); // Preallocate
-
-  double squared_scan_min_range = scan_min_range_ * scan_min_range_;
-  double squared_scan_max_range = scan_max_range_ * scan_max_range_;
-
-  // Filter point cloud based on distace
-  for (const auto &p : pc_ptr->points)
-  {
-    double squared_distance = p.x * p.x + p.y * p.y;
-    if (squared_distance > squared_scan_min_range && squared_distance < squared_scan_max_range)
-    {
-      tmp_ptr2->points.push_back(p); // Add point within the valid range
+    if (!initial_pose_received_) {
+        RCLCPP_WARN(get_logger(), "initial_pose is not received");
+        return;
     }
-  }
+    RCLCPP_INFO(get_logger(), "Received point cloud with %d points.", cloud.width * cloud.height);
 
-  pc_ptr.swap(tmp_ptr2); // update pc_ptr
+    sensor_msgs::msg::PointCloud2 transformed_msg;
+    try {
 
-  handlePointCloud(pc_ptr, cloud.header);
+        auto time_point = tf2::TimePoint(
+            std::chrono::seconds(cloud.header.stamp.sec) + 
+            std::chrono::nanoseconds(cloud.header.stamp.nanosec)
+        );
+        const auto transform = tfbuffer_.lookupTransform(
+            base_frame_, cloud.header.frame_id, time_point
+        );
+
+        tf2::doTransform(cloud, transformed_msg, transform);  
+    } catch (tf2::TransformException &e) {
+        RCLCPP_ERROR(this->get_logger(), "%s", e.what());
+        return;
+    }
+
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pc_ptr(new pcl::PointCloud<pcl::PointXYZI>());
+    pcl::fromROSMsg(transformed_msg, *pc_ptr);
+
+    pcl::PointCloud<pcl::PointXYZI>::Ptr tmp_ptr2(new pcl::PointCloud<pcl::PointXYZI>());
+    tmp_ptr2->points.reserve(pc_ptr->points.size());
+
+    double squared_scan_min_range = scan_min_range_ * scan_min_range_;
+    double squared_scan_max_range = scan_max_range_ * scan_max_range_;
+
+    // Filter point cloud based on distance
+    for (const auto &p : pc_ptr->points) {
+        double squared_distance = p.x * p.x + p.y * p.y;
+        if (squared_distance > squared_scan_min_range && squared_distance < squared_scan_max_range) {
+            tmp_ptr2->points.push_back(p); // Add point within the valid range
+        }
+    }
+
+    pc_ptr.swap(tmp_ptr2); // update pc_ptr
+
+    handlePointCloud(pc_ptr, cloud.header); 
 }
 
-void Ndt_slam::initial_pose_callback(const typename geometry_msgs::msg::PoseStamped::SharedPtr msg)
+void localization::initial_pose_callback(const typename geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
   if (msg->header.frame_id != map_frame_)
   {
@@ -165,19 +180,19 @@ void Ndt_slam::initial_pose_callback(const typename geometry_msgs::msg::PoseStam
 /**
  * @brief Sets up publishers and subscribers for the node.
  **/
-void Ndt_slam::initializePubSub()
+void localization::initializePubSub()
 {
   rclcpp::QoS custom_qos(500); 
   custom_qos.keep_all();        
   custom_qos.reliable();       
   
   pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("current_pose", 10);
-  map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("map", 10);
+  map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("global_map", 10);
   map_array_pub_ = this->create_publisher<slam_msgs::msg::MapArray>("map_array", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
   path_pub_ = this->create_publisher<nav_msgs::msg::Path>("path", 10);
 
-  initial_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>("initial_pose", 10, std::bind(&Ndt_slam::initial_pose_callback, this, std::placeholders::_1));
-  input_cloud_sub_ = this->create_subscription<slam_msgs::msg::PointCloudIndex>("pointcloud_indexed", custom_qos , std::bind(&Ndt_slam::cloud_callback, this, std::placeholders::_1));
+  initial_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>("initial_pose", 10, std::bind(&localization::initial_pose_callback, this, std::placeholders::_1));
+  input_cloud_sub_ = this->create_subscription<slam_msgs::msg::PointCloudIndex>("pointcloud_indexed", custom_qos , std::bind(&localization::cloud_callback, this, std::placeholders::_1));
 }
 
 /**
@@ -188,7 +203,7 @@ void Ndt_slam::initializePubSub()
  * @param pc_ptr Shared pointer to the point cloud data.
  * @param header Header of the point cloud message.
  */
-void Ndt_slam::handlePointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr &pc_ptr, const std_msgs::msg::Header &header)
+void localization::handlePointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr &pc_ptr, const std_msgs::msg::Header &header)
 {
     try
     {
@@ -212,35 +227,43 @@ void Ndt_slam::handlePointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr &pc_p
     }
 }
 
-void Ndt_slam::map_init(const pcl::PointCloud<pcl::PointXYZI>::Ptr &pc_ptr, const std_msgs::msg::Header &header)
+void localization::map_init(const pcl::PointCloud<pcl::PointXYZI>::Ptr &pc_ptr, const std_msgs::msg::Header &header)
 {
+    std::string package_path = ament_index_cpp::get_package_share_directory("localization_pkg");
+    std::string file_path = package_path + "/maps/final_map.pcd";
+
     auto cloud_ptr = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+    if (pcl::io::loadPCDFile<pcl::PointXYZI>(file_path, *cloud_ptr) == -1) {
+        RCLCPP_ERROR(get_logger(), "Couldn't read file %s", file_path.c_str());
+        return;
+    }
+    
+    RCLCPP_ERROR(get_logger(), "the Map is Loaded");
+
     pcl::VoxelGrid<pcl::PointXYZI> voxel_grid;
     voxel_grid.setLeafSize(map_voxel_grid_size_, map_voxel_grid_size_, map_voxel_grid_size_);
-    voxel_grid.setInputCloud(pc_ptr);
-    voxel_grid.filter(*cloud_ptr);
+    voxel_grid.setInputCloud(cloud_ptr);
 
-    if (cloud_ptr->empty())
+    auto filtered_cloud_ptr = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+    voxel_grid.filter(*filtered_cloud_ptr);
+
+    if (filtered_cloud_ptr->empty())
     {
         RCLCPP_WARN(get_logger(), "Filtered cloud is empty");
         return;
     }
 
-    // Transform the cloud to the current pose.
     auto sim_trans = poseToEigenMatrix(current_pose_stamped_.pose);
     auto transformed_cloud_ptr = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
-    pcl::transformPointCloud(*cloud_ptr, *transformed_cloud_ptr, sim_trans);
+    pcl::transformPointCloud(*filtered_cloud_ptr, *transformed_cloud_ptr, sim_trans);
 
-    // Set the transformed cloud as the new target for registration.
     registration_method_->setInputTarget(transformed_cloud_ptr);
 
-    // publish transformed cloud  .
     auto map_msg_ptr = std::make_shared<sensor_msgs::msg::PointCloud2>();
     pcl::toROSMsg(*transformed_cloud_ptr, *map_msg_ptr);
 
-    // Prepare a map segment for the map array.
     auto cloud_msg_ptr = std::make_shared<sensor_msgs::msg::PointCloud2>();
-    pcl::toROSMsg(*cloud_ptr, *cloud_msg_ptr);
+    pcl::toROSMsg(*filtered_cloud_ptr, *cloud_msg_ptr);
     slam_msgs::msg::MapSeg mapseg;
     mapseg.header = header;
     mapseg.pose = current_pose_stamped_.pose;
@@ -248,14 +271,13 @@ void Ndt_slam::map_init(const pcl::PointCloud<pcl::PointXYZI>::Ptr &pc_ptr, cons
     map_array_msg_.header = header;
     map_array_msg_.mapsegs.push_back(mapseg);
 
-    // Publish the map
     map_pub_->publish(mapseg.cloud);
 
-    RCLCPP_INFO(get_logger(), "Map initialized with a new segment, total points: %lu", transformed_cloud_ptr->size());
+    RCLCPP_INFO(get_logger(), "Map initialized from PCD file, total points: %lu", transformed_cloud_ptr->size());
 }
 
 
-void Ndt_slam::receiveCloud(const pcl::PointCloud<pcl::PointXYZI>::ConstPtr &cloud_ptr, const rclcpp::Time &stamp)
+void localization::receiveCloud(const pcl::PointCloud<pcl::PointXYZI>::ConstPtr &cloud_ptr, const rclcpp::Time &stamp)
 {
     // Check if a map update is ready to process new input.
     if (mapping_flag_ && mapping_future_.valid())
@@ -315,7 +337,7 @@ void Ndt_slam::receiveCloud(const pcl::PointCloud<pcl::PointXYZI>::ConstPtr &clo
 }
 
 
-void Ndt_slam::publishTransformedPose(
+void localization::publishTransformedPose(
     const pcl::PointCloud<pcl::PointXYZI>::ConstPtr &cloud_ptr,
     const Eigen::Matrix4f &final_transformation,
     const rclcpp::Time &stamp)
@@ -350,9 +372,6 @@ void Ndt_slam::publishTransformedPose(
 
   // Update the path and publish
   path_.poses.push_back(current_pose_stamped_);
-  
-  // RCLCPP_INFO(this->get_logger(), "Number of poses in path: %lu", path_.poses.size());
-
   path_pub_->publish(path_);
 
   // Check if a map update is needed based on the movement threshold
@@ -363,26 +382,24 @@ void Ndt_slam::publishTransformedPose(
   }
 }
 
-void Ndt_slam::prepareMapUpdateTask(
+void localization::prepareMapUpdateTask(
     const pcl::PointCloud<pcl::PointXYZI>::ConstPtr &cloud_ptr,
     const Eigen::Matrix4f &final_transformation)
 {
   previous_position_ = Eigen::Vector3d(final_transformation.block<3, 1>(0, 3).cast<double>());
 
-  // Set up and dispatch the map update task
   mapping_task_ = std::packaged_task<void()>(
-      std::bind(&Ndt_slam::updateMap, this, cloud_ptr, final_transformation, current_pose_stamped_));
+      std::bind(&localization::updateLocation, this, cloud_ptr, final_transformation, current_pose_stamped_));
   mapping_future_ = mapping_task_.get_future();
   mapping_thread_ = std::thread(std::move(mapping_task_));
   mapping_flag_ = true;
 }
 
-void Ndt_slam::updateMap(
+void localization::updateLocation(
     const pcl::PointCloud<pcl::PointXYZI>::ConstPtr cloud_ptr,
     const Eigen::Matrix4f final_transformation,
     const geometry_msgs::msg::PoseStamped current_pose_stamped)
 {
-    // Reduce the number of points using voxel grid
     pcl::PointCloud<pcl::PointXYZI>::Ptr filtered_cloud_ptr(new pcl::PointCloud<pcl::PointXYZI>());
     pcl::VoxelGrid<pcl::PointXYZI> voxel_grid;
     voxel_grid.setLeafSize(map_voxel_grid_size_, map_voxel_grid_size_, map_voxel_grid_size_);
@@ -414,7 +431,6 @@ void Ndt_slam::updateMap(
         targeted_cloud_ += *pc_ptr;
     }
 
-    // Prepare the map segment for publication
     sensor_msgs::msg::PointCloud2 cloud_msg;
     pcl::toROSMsg(*filtered_cloud_ptr, cloud_msg);
     cloud_msg.header.frame_id = map_frame_;
@@ -427,25 +443,21 @@ void Ndt_slam::updateMap(
     mapseg.distance = latest_distance_;
     mapseg.pose = current_pose_stamped.pose;
     mapseg.cloud = cloud_msg;
-    map_array_msg_.mapsegs.push_back(mapseg);
 
     map_array_pub_->publish(map_array_msg_);
 
     is_map_updated_ = true;
 
 
-    // Publish the complete map
     rclcpp::Time map_time = this->get_clock()->now();
     double dt = (map_time - last_map_time_).seconds();
     if (dt > map_publish_period_) {
         map_pub(map_array_msg_, map_frame_);
         last_map_time_ = map_time;
     }
-
-    RCLCPP_INFO(this->get_logger(), "Map updated successfully.");
 }
 
-Eigen::Matrix4f Ndt_slam::poseToEigenMatrix(const geometry_msgs::msg::Pose pose)
+Eigen::Matrix4f localization::poseToEigenMatrix(const geometry_msgs::msg::Pose pose)
 {
   // Convert ROS Pose to Eigen Affine transformation
   Eigen::Affine3d affine;
@@ -455,7 +467,7 @@ Eigen::Matrix4f Ndt_slam::poseToEigenMatrix(const geometry_msgs::msg::Pose pose)
   return affine.matrix().cast<float>();
 }
 
-void Ndt_slam::map_pub(const slam_msgs::msg::MapArray &map_array_msg, const std::string &map_frame_id)
+void localization::map_pub(const slam_msgs::msg::MapArray &map_array_msg, const std::string &map_frame_id)
 {
   pcl::PointCloud<pcl::PointXYZI>::Ptr aggregated_map(new pcl::PointCloud<pcl::PointXYZI>);
 
@@ -483,10 +495,10 @@ void Ndt_slam::map_pub(const slam_msgs::msg::MapArray &map_array_msg, const std:
 
 }
 
-void Ndt_slam::savePointCloud(const std::string& filename)
+void localization::savePointCloud(const std::string& filename)
 {
     pcl::PointCloud<pcl::PointXYZI>::Ptr aggregated_map(new pcl::PointCloud<pcl::PointXYZI>());
-    unsigned int index_ = 0;
+
     // Aggregate all map segments
     for (const auto& mapseg : map_array_msg_.mapsegs)
     {
@@ -500,7 +512,6 @@ void Ndt_slam::savePointCloud(const std::string& filename)
         *aggregated_map += *cloud_ptr; // Aggregated map
     }
 
-    // Save the aggregated map to a PCD file
     if (pcl::io::savePCDFileBinary(filename, *aggregated_map) == 0)
     {
         RCLCPP_INFO(this->get_logger(), "Saved point cloud map to %s", filename.c_str());
@@ -509,30 +520,110 @@ void Ndt_slam::savePointCloud(const std::string& filename)
     {
         RCLCPP_ERROR(this->get_logger(), "Failed to save point cloud map to %s", filename.c_str());
     }
-    
-    
-    // Save the path data
-    std::string path_filename = filename.substr(0, filename.find_last_of('.')) + "_path.csv";
-    std::ofstream path_file(path_filename);
-    if (path_file.is_open())
-    {
-      path_file << "Index,X,Y,Z,Qx,Qy,Qz,Qw\n";
-      for (const auto &pose : path_.poses)
-      {
-        path_file << index_ << ","
-                  << pose.pose.position.x << ","
-                  << pose.pose.position.y << ","
-                  << pose.pose.position.z << ","
-                  << pose.pose.orientation.x << ","
-                  << pose.pose.orientation.y << ","
-                  << pose.pose.orientation.z << ","
-                  << pose.pose.orientation.w << "\n";
-                  index_++;
-      }
-      path_file.close();
+}
+
+void localization::restartSLAM(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+                               std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+{
+    RCLCPP_INFO(this->get_logger(), "Restarting localization");
+
+    map_array_msg_.mapsegs.clear();
+    path_.poses.clear();
+
+
+    map_array_msg_.mapsegs.clear();
+    path_.poses.clear();
+    is_map_init_flag_ = false;
+    initial_pose_received_ = false;
+
+    initial_pose_x_ = 0.0;
+    initial_pose_y_ = 0.0;
+    initial_pose_z_ = 0.0;
+    initial_pose_qx_ = 0.0;
+    initial_pose_qy_ = 0.0;
+    initial_pose_qz_ = 0.0;
+    initial_pose_qw_ = 1.0;
+
+    if (is_intial_pose_set) {
+        setInitialPose();
     }
-    else
-    {
-        RCLCPP_ERROR(this->get_logger(), "Failed to open path file for writing: %s", path_filename.c_str());
+
+    response->success = true;
+    response->message = "localization restarted successfully.";
+}
+
+
+
+
+void localization::handleRelocalization(const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                                        std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+{
+    std::string package_path = ament_index_cpp::get_package_share_directory("localization_pkg");
+    std::string file_path = package_path + "/maps/final_map_path.csv";
+    std::ifstream file(file_path);
+    std::string line;
+    std::vector<std::string> vec;
+    bool found = false;
+
+    if (!file.is_open()) {
+        response->message = "Failed to open pose file.";
+        response->success = false;
+        return;
+    }
+
+
+    std::getline(file, line);
+
+    try {
+        while (std::getline(file, line)) {
+            std::stringstream ss(line);
+            std::string cell;
+
+            vec.clear();
+            while (std::getline(ss, cell, ',')) {
+                vec.push_back(cell);
+            }
+
+            if (vec.size() < 8) {
+                RCLCPP_ERROR(this->get_logger(), "Incorrect format in CSV line: %s", line.c_str());
+                continue;
+            }
+
+            try {
+                int index = std::stoi(vec[0]);
+                if (index == cloud_index_) {
+                    initial_pose_x_ = std::stod(vec[1]);
+                    initial_pose_y_ = std::stod(vec[2]);
+                    initial_pose_z_ = std::stod(vec[3]);
+                    initial_pose_qx_ = std::stod(vec[4]);
+                    initial_pose_qy_ = std::stod(vec[5]);
+                    initial_pose_qz_ = std::stod(vec[6]);
+                    initial_pose_qw_ = std::stod(vec[7]);
+                    found = true;
+                    break;
+                }
+            } catch (const std::exception& e) {
+                RCLCPP_ERROR(this->get_logger(), "Conversion error on line: %s, error: %s", line.c_str(), e.what());
+                continue; 
+            }
+        }
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(this->get_logger(), "Exception caught while processing CSV: %s", e.what());
+        response->message = "Unexpected error while processing CSV.";
+        response->success = false;
+        file.close();
+        return;
+    }
+
+    file.close();
+
+    if (found) {
+        setInitialPose();
+        response->message = "Relocalization successful.";
+        RCLCPP_INFO(this->get_logger(), "--------------------Relocalization successful for index: %d", cloud_index_);
+        response->success = true;
+    } else {
+        response->message = "Index not found in pose file.";
+        response->success = false;
     }
 }

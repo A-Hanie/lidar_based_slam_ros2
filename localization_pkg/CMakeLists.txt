@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(ndt_slam)
+project(localization_pkg)
 
 if(NOT CMAKE_C_STANDARD)
   set(CMAKE_C_STANDARD 99)
@@ -19,9 +19,6 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(rviz_2d_overlay_msgs REQUIRED)
-find_package(pointcloud_interfaces REQUIRED) # Find the pointcloud_interfaces package
-
 find_package(nav_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
@@ -48,7 +45,6 @@ set(dependencies
   slam_msgs
   ndt_omp_ros2
   std_srvs
-  pointcloud_interfaces
 )
 
 if (OPENMP_FOUND)
@@ -61,25 +57,22 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-add_library(ndt_slam SHARED
-src/ndt_slam.cpp
+add_library(localization SHARED
+src/localization.cpp
 )
 
-ament_target_dependencies(ndt_slam ${dependencies})
+ament_target_dependencies(localization ${dependencies})
 
-add_executable(ndt_slam_node
-src/ndt_slam_node.cpp
+add_executable(localization_node
+src/localization_node.cpp
 )
 
-target_link_libraries(ndt_slam_node
-ndt_slam ${PCL_LIBRARIES})
+target_link_libraries(localization_node
+localization ${PCL_LIBRARIES})
 
-ament_target_dependencies(ndt_slam_node
+ament_target_dependencies(localization_node
   rclcpp
-  
-  pointcloud_interfaces #  pointcloud_interfaces   
-
-  )
+  slam_msgs)
 
 include_directories(
     include
@@ -92,7 +85,7 @@ add_definitions(${PCL_DEFINITIONS})
 
 
 
-ament_export_libraries(ndt_slam)
+ament_export_libraries(localization)
 
 install(
   DIRECTORY "include/"
@@ -100,25 +93,22 @@ install(
 )
 
 install(
-  DIRECTORY launch rviz scripts data
+  DIRECTORY launch rviz maps
   DESTINATION share/${PROJECT_NAME}
 )
 
 install(TARGETS
-  ndt_slam
+  localization  
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
 
 install(TARGETS 
-  ndt_slam_node
+  localization_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-install(PROGRAMS scripts/Statistics.py
-  DESTINATION lib/${PROJECT_NAME}
-)
 
 
 

@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>ndt_slam</name>
+  <name>localization_pkg</name>
   <version>0.0.0</version>
-  <description>ndt_slam </description>
+  <description>localization_pkg </description>
   <maintainer email="ahanymost@gmail.com">hany</maintainer>
   <license>--</license>
 
@@ -26,14 +26,8 @@
   <depend>ndt_omp_ros2</depend>
   <depend>libg2o</depend>
   <depend>libpcl-all-dev</depend>
-  <depend>rviz_2d_overlay_msgs</depend>
 
-
-  <build_depend>pointcloud_interfaces</build_depend>
-  <exec_depend>pointcloud_interfaces</exec_depend>
-
-  
-  <export>4
+  <export>
     <build_type>ament_cmake</build_type>
   </export>
 </package>
