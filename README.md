@@ -23,6 +23,9 @@ flowchart LR
     O --> R[Save Map on Request]
     R --> P
 ```
+
+![NDT SLAM](docs/ndt_slam.gif)
+
 ##  Installation
 
 #### 1. Clone the repo and build with
