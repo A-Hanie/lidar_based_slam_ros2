@@ -1,4 +1,4 @@
-# Text me: WhatsApp number: `+201154179988`
+# Hello Edouard can you Text me at WhatsApp number: `+201154179988`
 # Email: `ahanymost@gmail.com`
 
 # lidar_based_slam_ros2
